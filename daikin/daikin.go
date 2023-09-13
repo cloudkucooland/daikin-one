@@ -13,6 +13,8 @@ type Daikin struct {
 	ApiKey          string
 	IntegratorToken string
 	Email           string
+	tokenCache      *Token
+	tokenExp        time.Time
 }
 
 type Token struct {
@@ -36,38 +38,50 @@ type Device struct {
 }
 
 type DeviceInfo struct {
-	CoolSetpoint           float32 `json:"coolSetpoint"`
-	HeatSetpoint           float32 `json:"heatSetpoint"`
-	FanCirculateSpeed      int     `json:"fanCirculateSpeed"`
-	EquipmentStatus        int     `json:"equipmentStatus"`
-	HumOutdoor             int     `json:"humOutdoor"`
-	TempIndoor             float32 `json:"tempIndoor"`
-	SetpointDelta          float32 `json:"setpointDelta"`
-	EquipmentCommunication int     `json:"equipmentCommunication"`
-	ModeEmHeatAvailable    bool    `json:"modeEmHeatAvailable"`
-	GeofencingEnabled      bool    `json:"geofencingEnabled"`
-	ScheduleEnabled        bool    `json:"scheduleEnabled"`
-	HumIndoor              int     `json:"humIndoor"`
-	ModeLimit              int     `json:"modeLimit"`
-	SetpointMinimum        float32 `json:"setpointMinimum"`
-	Fan                    int     `json:"fan"`
-	TempOutdoor            float32 `json:"tempOutdoor"`
-	Mode                   int     `json:"mode"`
-	SetpointMaximum        float32 `json:"setpointMaximum"`
+	CoolSetpoint           float32         `json:"coolSetpoint"`
+	HeatSetpoint           float32         `json:"heatSetpoint"`
+	FanCirculateSpeed      int             `json:"fanCirculateSpeed"`
+	EquipmentStatus        EquipmentStatus `json:"equipmentStatus"`
+	HumOutdoor             int             `json:"humOutdoor"`
+	TempIndoor             float32         `json:"tempIndoor"`
+	SetpointDelta          float32         `json:"setpointDelta"`
+	EquipmentCommunication int             `json:"equipmentCommunication"`
+	ModeEmHeatAvailable    bool            `json:"modeEmHeatAvailable"`
+	GeofencingEnabled      bool            `json:"geofencingEnabled"`
+	ScheduleEnabled        bool            `json:"scheduleEnabled"`
+	HumIndoor              int             `json:"humIndoor"`
+	ModeLimit              int             `json:"modeLimit"`
+	SetpointMinimum        float32         `json:"setpointMinimum"`
+	Fan                    int             `json:"fan"`
+	TempOutdoor            float32         `json:"tempOutdoor"`
+	Mode                   RunningMode     `json:"mode"`
+	SetpointMaximum        float32         `json:"setpointMaximum"`
 }
 
 type ModeSetpointOptions struct {
-	Mode         int     `json:"mode"`
-	HeatSetpoint float32 `json:"heatSetpoint"`
-	CoolSetpoint float32 `json:"coolSetpoint"`
+	Mode         RunningMode `json:"mode"`
+	HeatSetpoint float32     `json:"heatSetpoint"`
+	CoolSetpoint float32     `json:"coolSetpoint"`
 }
 
+type EquipmentStatus uint8
+
 const (
-	EquipmentStatusCool     = 1
-	EquipmentStatusOvercool = 2
-	EquipmentStatusHeat     = 3
-	EquipmentStatusFan      = 4
-	EquipmentStatusIdle     = 5
+	EquipmentStatusCool     EquipmentStatus = 1
+	EquipmentStatusOvercool EquipmentStatus = 2
+	EquipmentStatusHeat     EquipmentStatus = 3
+	EquipmentStatusFan      EquipmentStatus = 4
+	EquipmentStatusIdle     EquipmentStatus = 5
+)
+
+type RunningMode uint8
+
+const (
+	ModeOff    RunningMode = 0
+	ModeHeat   RunningMode = 1
+	ModeCool   RunningMode = 2
+	ModeAuto   RunningMode = 3
+	ModeEmHeat RunningMode = 4
 )
 
 var httpClient = &http.Client{Timeout: 10 * time.Second}
@@ -79,10 +93,15 @@ func New(apiKey string, integratorToken string, email string) *Daikin {
 		IntegratorToken: integratorToken,
 		Email:           email,
 	}
+
 	return &d
 }
 
 func (d *Daikin) getToken() (string, error) {
+	if d.tokenCache != nil && time.Now().Before(d.tokenExp) {
+		return d.tokenCache.AccessToken, nil
+	}
+
 	body := []byte(`{
 		"email": "` + d.Email + `",
 		"integratorToken": "` + d.IntegratorToken + `"
@@ -113,6 +132,9 @@ func (d *Daikin) getToken() (string, error) {
 		return "", errors.New("json decode failed")
 	}
 
+	fmt.Printf("%+v\n", token)
+	d.tokenCache = token
+	d.tokenExp = time.Now().Add(time.Duration(token.AccessTokenExpiresIn) * time.Second)
 	return token.AccessToken, nil
 }
 
@@ -189,7 +211,6 @@ func (d *Daikin) GetDeviceInfo(deviceId string) (*DeviceInfo, error) {
 }
 
 func (d *Daikin) UpdateModeSetpoint(deviceId string, options ModeSetpointOptions) error {
-
 	body, err := json.Marshal(options)
 	if err != nil {
 		return errors.New("json.Marshal failed")
